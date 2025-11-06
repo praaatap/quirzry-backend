@@ -1,0 +1,45 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  name                String
+  email               String              @unique
+  id                  Int                 @id @default(autoincrement())
+  password            String
+  fcmToken            String?             // Already there!
+  quizzes             Quiz[]
+  createdAt           DateTime            @default(now())
+  // Add these relations
+  sentChallenges      Challenge[]         @relation("challenger")
+  receivedChallenges  Challenge[]         @relation("opponent")
+}
+
+model Quiz {
+  id          Int       @id @default(autoincrement())
+  title       String
+  description String?
+  user        User      @relation(fields: [userId], references: [id])
+  userId      Int
+  questions   Json
+  createdAt   DateTime  @default(now())
+}
+
+// Add this new model
+model Challenge {
+  id           Int      @id @default(autoincrement())
+  challengerId Int
+  opponentId   Int
+  status       String   @default("pending") // pending, accepted, rejected, expired, cancelled
+  quizId       Int?     // Optional: link to specific quiz
+  createdAt    DateTime @default(now())
+  expiresAt    DateTime
+  acceptedAt   DateTime?
+  challenger   User     @relation("challenger", fields: [challengerId], references: [id])
+  opponent     User     @relation("opponent", fields: [opponentId], references: [id])
+}
