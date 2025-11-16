@@ -298,3 +298,5 @@ export const getMyChallenges = asyncHandler(async (req, res) => {
   console.log(`✅ Found ${challenges.length} challenges`);
   res.json({ challenges });
 });
+
+

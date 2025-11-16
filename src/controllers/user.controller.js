@@ -66,3 +66,5 @@ export const searchUsers = asyncHandler(async (req, res) => {
 
   res.json({ users });
 });
+
+

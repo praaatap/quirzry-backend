@@ -23,12 +23,24 @@ model User {
 model Quiz {
   id          Int       @id @default(autoincrement())
   title       String
-  description String?
-  user        User      @relation(fields: [userId], references: [id])
   userId      Int
-  questions   Json
+  user        User      @relation(fields: [userId], references: [id])
+  questions   Question[]
   createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 }
+
+model Question {
+  id             Int      @id @default(autoincrement())
+  quizId         Int
+  quiz           Quiz     @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  questionText   String
+  options        Json     // Array of strings
+  correctAnswer  Int      // Index of correct option
+  questionNumber Int
+  createdAt      DateTime @default(now())
+}
+
 
 // Add this new model
 model Challenge {

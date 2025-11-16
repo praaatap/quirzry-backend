@@ -4,7 +4,7 @@ import jwt from "jsonwebtoken";
 import googleClient from "../config/google.js";
 import asyncHandler from "../middleware/asyncHandler.js";
 
-// --- Signup Route ---
+// ==================== SIGNUP ====================
 export const signup = asyncHandler(async (req, res) => {
   const { name, email, password } = req.body;
   console.log(`📝 Signup attempt for: ${email}`);
@@ -37,7 +37,7 @@ export const signup = asyncHandler(async (req, res) => {
   });
 });
 
-// --- Signin Route ---
+// ==================== SIGNIN ====================
 export const signin = asyncHandler(async (req, res) => {
   const { email, password } = req.body;
   console.log(`🔐 Signin attempt for: ${email}`);
@@ -71,7 +71,7 @@ export const signin = asyncHandler(async (req, res) => {
   });
 });
 
-// --- Google Sign-In ---
+// ==================== GOOGLE SIGN-IN ====================
 export const googleAuth = asyncHandler(async (req, res) => {
   const { token } = req.body;
   console.log("🔐 Google sign-in attempt");
@@ -121,25 +121,65 @@ export const googleAuth = asyncHandler(async (req, res) => {
   });
 });
 
-// --- Save FCM Token ---
+// ==================== VERIFY TOKEN (NEW) ====================
+export const verifyToken = asyncHandler(async (req, res) => {
+  const userId = req.userId; // From authenticateToken middleware
+  
+  console.log(`🔐 Token verification for user ID: ${userId}`);
+
+  // Fetch user details to confirm token is valid and user exists
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      createdAt: true,
+    },
+  });
+
+  if (!user) {
+    console.log("❌ User not found in database");
+    return res.status(404).json({ error: "User not found" });
+  }
+
+  console.log(`✅ Token verified for user: ${user.name}`);
+  
+  res.status(200).json({
+    valid: true,
+    user: {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+    },
+  });
+});
+
+// ==================== SAVE FCM TOKEN ====================
 export const saveFcmToken = asyncHandler(async (req, res) => {
   const { fcmToken } = req.body;
-  const userId = req.userId; // From authenticateToken middleware
+  const userId = req.userId; // From JWT middleware
 
   if (!fcmToken) {
     return res.status(400).json({ error: "FCM token is required" });
   }
 
-  await prisma.user.update({
+  console.log(`💾 Saving FCM token for user ${userId}`);
+
+  // Update user's FCM token in database
+  const user = await prisma.user.update({
     where: { id: userId },
     data: { fcmToken },
   });
 
-  console.log(`✅ FCM token saved for user ID: ${userId}`);
-  res.json({ message: "FCM token saved successfully" });
+  console.log(`✅ FCM token saved for ${user.name}`);
+
+  res.json({
+    message: "FCM token saved successfully",
+  });
 });
 
-// --- Reset Password ---
+// ==================== RESET PASSWORD ====================
 export const resetPassword = asyncHandler(async (req, res) => {
   const { email, newPassword } = req.body;
   console.log(`🔑 Password reset attempt for: ${email}`);

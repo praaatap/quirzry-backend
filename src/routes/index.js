@@ -2,7 +2,7 @@ import express from "express";
 import authRoutes from "./auth.routes.js";
 import userRoutes from "./user.routes.js";
 import challengeRoutes from "./challenge.routes.js";
-
+import quizRoutes from './quiz.routes.js';
 const router = express.Router();
 
 // --- Home Route ---
@@ -19,5 +19,6 @@ router.get("/", (req, res) => {
 router.use("/", authRoutes);
 router.use("/", userRoutes);
 router.use("/challenge", challengeRoutes);
+router.use("/quiz", quizRoutes); 
 
 export default router;
