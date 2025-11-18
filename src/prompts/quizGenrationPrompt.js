@@ -1,47 +1,43 @@
+// quizController.js
+import { Groq } from "groq-sdk";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import prisma from "../config/prisma.js";
-import { GoogleGenerativeAI } from "@google/generative-ai";
-import { generateQuizPrompt } from "../prompts/quizGenrationPrompt.js";
+import {GROQ_API_KEY} from '../constants.js';
 
-const GEMINI_KEY='AIzaSyBdFlmixwotYjNoE1RvNetnnFkN6Llynl0';
-
-// Initialize Gemini AI
-const genAI = new GoogleGenerativeAI("AIzaSyC7e42D3PNt-rNn-KpZNkT4wwlar0imOyA");
-const model = genAI.getGenerativeModel({
-  model: "gemini-2.5-flash",
-  generationConfig: {
-    temperature: 0.7,
-    topK: 40,
-    topP: 0.95,
-    maxOutputTokens: 8192,
-    responseMimeType: "application/json",
-  },
+// Initialize Groq client (set GROQ_API_KEY in env)
+const groq = new Groq({
+  apiKey:GROQ_API_KEY
+  // optionally: baseUrl or other config
 });
 
-// Helper: safely extract text from the model result
+/**
+ * Helper: safely extract text from the model result (adapted for groq SDK shapes)
+ */
 async function extractTextFromResult(result) {
-  // Some SDKs return result.response.text() as a function that returns a Promise,
-  // others return a string directly. Handle both.
   try {
-    const response = result?.response;
-    if (!response) {
-      // If SDK returns top-level string or object, try to stringify
-      if (typeof result === "string") return result;
-      return JSON.stringify(result);
+    if (!result) return "";
+
+    // Common groq response shape: result.choices[0].message.content (string)
+    const choice = result.choices && result.choices[0];
+    if (choice) {
+      if (choice.message && typeof choice.message.content === "string") {
+        return choice.message.content;
+      }
+      if (choice.delta && typeof choice.delta.content === "string") {
+        return choice.delta.content;
+      }
+      if (typeof choice.text === "string") {
+        return choice.text;
+      }
     }
 
-    if (typeof response.text === "function") {
-      // async text() function
-      return await response.text();
-    }
+    // Top-level fallbacks
+    if (typeof result.text === "string") return result.text;
+    if (typeof result.content === "string") return result.content;
 
-    // If response is a string already
-    if (typeof response === "string") return response;
-
-    // Otherwise stringify the response object
-    return JSON.stringify(response);
+    // Last fallback: stringify
+    return JSON.stringify(result);
   } catch (err) {
-    // fallback
     console.warn("Failed to extract text from result, falling back to JSON stringify", err);
     try {
       return JSON.stringify(result);
@@ -51,9 +47,112 @@ async function extractTextFromResult(result) {
   }
 }
 
-// ==================== GENERATE QUIZ WITH GEMINI AI ====================
+/**
+ * Generate optimized prompt for quiz generation
+ * (Same strict JSON-only spec your original code used)
+ */
+export const generateQuizPrompt = (topic, questionCount, difficulty) => {
+  const difficultyDescriptions = {
+    easy: 'suitable for beginners with basic knowledge. Questions should be straightforward with clear answers.',
+    medium: 'suitable for intermediate learners with some experience. Questions should require understanding and application of concepts.',
+    hard: 'suitable for advanced learners with deep understanding. Questions should be challenging and require critical thinking.'
+  };
+
+  const difficultyExamples = {
+    easy: `Example: "What does HTML stand for?"`,
+    medium: `Example: "How does the JavaScript event loop handle asynchronous operations?"`,
+    hard: `Example: "Explain the implications of using WeakMap versus Map in terms of garbage collection and memory management."`
+  };
+
+  return `You are an expert educational quiz generator with deep knowledge across multiple subjects. Generate a high-quality, pedagogically sound quiz based on the following specifications:
+
+**QUIZ SPECIFICATIONS**
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+• Topic: ${topic}
+• Number of Questions: ${questionCount}
+• Difficulty Level: ${difficulty.toUpperCase()}
+  └─ ${difficultyDescriptions[difficulty]}
+  └─ ${difficultyExamples[difficulty]}
+
+**QUESTION REQUIREMENTS**
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. ✅ Each question must be clear, specific, and educational
+2. ✅ Each question must have exactly 4 distinct options (A, B, C, D)
+3. ✅ Only ONE option should be definitively correct
+4. ✅ All options must be plausible and relevant (avoid obviously wrong answers)
+5. ✅ Questions should test ${difficulty === 'easy' ? 'basic recall and understanding' : difficulty === 'medium' ? 'application and analysis' : 'synthesis and evaluation'}
+6. ✅ Use proper grammar, punctuation, and formatting
+7. ✅ Questions should progressively cover different aspects of the topic
+8. ✅ Avoid ambiguous or trick questions
+9. ✅ Options should be similar in length and complexity
+10. ✅ Distribute correct answers evenly across all positions (0, 1, 2, 3)
+
+**CONTENT GUIDELINES**
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+• Focus on practical, real-world applications when possible
+• Include diverse question types: definitions, applications, comparisons, scenarios
+• Ensure factual accuracy and up-to-date information
+• Make questions engaging and thought-provoking
+• Avoid cultural bias or assumptions
+
+**OUTPUT FORMAT** (CRITICAL - STRICT JSON ONLY)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Return ONLY valid JSON in this exact format:
+
+{
+  "questions": [
+    {
+      "questionText": "Your well-crafted question here?",
+      "options": [
+        "First option",
+        "Second option",
+        "Third option",
+        "Fourth option"
+      ],
+      "correctAnswer": 2
+    }
+  ]
+}
+
+**CRITICAL RULES**
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+⚠️  "correctAnswer" MUST be an INTEGER (0, 1, 2, or 3) representing the index
+⚠️  DO NOT include markdown code blocks (\`\`\`json or \`\`\`)
+⚠️  DO NOT include any explanatory text before or after the JSON
+⚠️  DO NOT include explanations for answers
+⚠️  Ensure all strings are properly escaped
+⚠️  Return ONLY the raw JSON object
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Generate exactly ${questionCount} questions now following all requirements above.`;
+};
+
+/**
+ * Simple fallback prompt (not strictly necessary but kept for robustness)
+ */
+export const generateSimpleQuizPrompt = (topic, questionCount, difficulty) => {
+  return `Generate a ${difficulty} difficulty quiz about "${topic}" with ${questionCount} questions.
+
+Return ONLY valid JSON (no markdown):
+{
+  "questions": [
+    {
+      "questionText": "Question text?",
+      "options": ["Option 1", "Option 2", "Option 3", "Option 4"],
+      "correctAnswer": 0
+    }
+  ]
+}
+
+Rules:
+- correctAnswer must be 0, 1, 2, or 3
+- No markdown formatting
+- No explanations`;
+};
+
+// ==================== GENERATE QUIZ USING Llama (via Groq) ====================
 export const generateQuiz = asyncHandler(async (req, res) => {
-  const { topic, questionCount = 15 } = req.body;
+  const { topic, questionCount = 15, difficulty = "medium" } = req.body;
   const userId = req.userId;
 
   // Validation
@@ -66,25 +165,34 @@ export const generateQuiz = asyncHandler(async (req, res) => {
   console.log(`🎯 Generating ${validQuestionCount} questions on: ${topic} for user ${userId}`);
 
   try {
-    // Generate prompt for Gemini
-    const prompt = generateQuizPrompt(topic, validQuestionCount, "medium");
+    // Build prompt
+    const prompt = generateQuizPrompt(topic, validQuestionCount, difficulty);
 
-    console.log("🤖 Calling Gemini AI...");
+    console.log("🤖 Calling Llama (via Groq)...");
+    // Call Groq chat completion using Llama instant model
+    const result = await groq.chat.completions.create({
+      model: process.env.LLAMA_MODEL_NAME || "llama-3.1-8b-instant",
+      messages: [
+        { role: "system", content: "You are a high-quality JSON-only quiz generator. Return only valid JSON following the spec." },
+        { role: "user", content: prompt }
+      ],
+      temperature: 0.7,
+      top_p: 0.95,
+      max_completion_tokens: 8192,
+      // stream: false  // leave false for synchronous response; if you prefer streaming set true and handle chunks
+    });
 
-    // Call Gemini AI API
-    const result = await model.generateContent(prompt);
     const text = await extractTextFromResult(result);
 
-    console.log("✅ Gemini response received");
+    console.log("✅ Llama (Groq) response received");
     console.log("📄 Raw response length:", text ? text.length : 0);
 
-    // Parse and validate the response
+    // ---------- Parsing and validation ----------
     let quizData;
     try {
-      // Clean the response text (remove markdown code fences if present)
       let cleanedText = (text || "").trim();
 
-      // Remove leading ```json or ``` code fences and trailing ``` fences
+      // Remove code fences if present
       if (cleanedText.startsWith("```json")) {
         cleanedText = cleanedText.replace(/^```json\n?/g, "");
       }
@@ -97,12 +205,10 @@ export const generateQuiz = asyncHandler(async (req, res) => {
 
       cleanedText = cleanedText.trim();
 
-      // If cleanedText looks like JSON already, parse. Otherwise attempt to find JSON substring.
-      // First attempt: direct parse
+      // Try direct parse, then fallback to extracting first JSON block
       try {
         quizData = JSON.parse(cleanedText);
       } catch (firstParseErr) {
-        // Try to find the first { ... } JSON block in the cleanedText
         const firstBrace = cleanedText.indexOf("{");
         const lastBrace = cleanedText.lastIndexOf("}");
         if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
@@ -113,20 +219,17 @@ export const generateQuiz = asyncHandler(async (req, res) => {
         }
       }
 
-      // Validate structure
       if (!quizData.questions || !Array.isArray(quizData.questions)) {
         throw new Error("Invalid response structure: missing questions array");
       }
-
       if (quizData.questions.length === 0) {
         throw new Error("No questions generated");
       }
 
       console.log(`✅ Parsed ${quizData.questions.length} questions`);
     } catch (parseError) {
-      console.error("❌ Failed to parse Gemini response:", parseError.message);
+      console.error("❌ Failed to parse model response:", parseError.message);
       console.error("Raw response (first 1000 chars):", (text || "").substring(0, 1000));
-
       return res.status(500).json({
         error: "Failed to generate valid quiz questions. Please try again.",
         details: process.env.NODE_ENV === "development" ? parseError.message : undefined,
@@ -137,30 +240,23 @@ export const generateQuiz = asyncHandler(async (req, res) => {
     const validatedQuestions = [];
     for (let i = 0; i < quizData.questions.length; i++) {
       const q = quizData.questions[i];
-
       try {
-        // Validate question structure
         if (!q || typeof q !== "object") {
           throw new Error(`Invalid question object at index ${i}`);
         }
-
         if (!q.questionText || typeof q.questionText !== "string") {
           throw new Error(`Invalid questionText at index ${i}`);
         }
-
         if (!q.options || !Array.isArray(q.options) || q.options.length !== 4) {
           throw new Error(`Invalid options at index ${i} — expected 4 options`);
         }
 
-        // Handle correctAnswer as either index (number) or value (string)
         let correctAnswerIndex;
         if (typeof q.correctAnswer === "number") {
           correctAnswerIndex = q.correctAnswer;
         } else if (typeof q.correctAnswer === "string") {
-          // Find the index of the correct answer in options
           correctAnswerIndex = q.options.indexOf(q.correctAnswer);
           if (correctAnswerIndex === -1) {
-            // Try a trimmed compare
             const trimmedMatch = q.options.map((o) => String(o).trim()).indexOf(q.correctAnswer.trim());
             if (trimmedMatch === -1) {
               throw new Error(`correctAnswer "${q.correctAnswer}" not found in options at index ${i}`);
@@ -171,7 +267,6 @@ export const generateQuiz = asyncHandler(async (req, res) => {
           throw new Error(`Invalid correctAnswer type at index ${i}`);
         }
 
-        // Validate index is in range
         if (typeof correctAnswerIndex !== "number" || correctAnswerIndex < 0 || correctAnswerIndex > 3) {
           throw new Error(`correctAnswer index out of range at index ${i}`);
         }
@@ -220,7 +315,6 @@ export const generateQuiz = asyncHandler(async (req, res) => {
 
     console.log(`✅ Quiz saved to database: ID ${quiz.id}`);
 
-    // Return response
     res.status(201).json({
       quizId: quiz.id,
       title: quiz.title,
@@ -237,8 +331,7 @@ export const generateQuiz = asyncHandler(async (req, res) => {
     console.error("❌ Quiz generation error:", error);
     console.error("❌ Error stack:", error?.stack);
 
-    // Handle specific error types
-    if (error.message?.includes("API key")) {
+    if (error.message?.includes("API key") || error.message?.includes("api key")) {
       return res.status(500).json({
         error: "API configuration error. Please contact support.",
       });
@@ -339,7 +432,6 @@ export const deleteQuiz = asyncHandler(async (req, res) => {
 
   console.log(`🗑️ Deleting quiz ${quizId} for user ${userId}`);
 
-  // Check if quiz exists and belongs to user
   const quiz = await prisma.quiz.findFirst({
     where: {
       id: parseInt(quizId, 10),
@@ -352,7 +444,6 @@ export const deleteQuiz = asyncHandler(async (req, res) => {
     return res.status(404).json({ error: "Quiz not found" });
   }
 
-  // Delete quiz (questions will be cascaded)
   await prisma.quiz.delete({
     where: {
       id: parseInt(quizId, 10),
