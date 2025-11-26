@@ -363,3 +363,50 @@ export const deleteQuiz = asyncHandler(async (req, res) => {
 
   res.json({ message: "Quiz deleted successfully" });
 });
+// ==================== RESET QUIZ COUNT (FOR TESTING) ====================
+export const resetQuizCount = asyncHandler(async (req, res) => {
+  const userId = req.userId;
+
+  console.log(`🔄 Resetting quiz count for user ${userId}`);
+
+  await prisma.user.update({
+    where: { id: userId },
+    data: { quizCount: 0 }
+  });
+
+  console.log(`✅ Quiz count reset to 0 for user ${userId}`);
+
+  res.json({
+    success: true,
+    message: "Quiz count reset successfully",
+    quizCount: 0
+  });
+});
+
+export const getQuizCount = asyncHandler(async (req, res) => {
+  const userId = req.userId;
+
+  console.log(`📊 Fetching quiz count for user ${userId}`);
+
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { 
+      quizCount: true,
+      name: true,
+      email: true 
+    }
+  });
+
+  if (!user) {
+    return res.status(404).json({ error: "User not found" });
+  }
+
+  console.log(`✅ Quiz count: ${user.quizCount || 0}`);
+
+  res.json({
+    success: true,
+    quizCount: user.quizCount || 0,
+    shouldShowAd: (user.quizCount || 0) >= 1, // First quiz is free
+    remainingFreeQuizzes: Math.max(0, 1 - (user.quizCount || 0))
+  });
+});
