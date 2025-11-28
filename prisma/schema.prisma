@@ -12,13 +12,15 @@ model User {
   email               String              @unique
   id                  Int                 @id @default(autoincrement())
   password            String
-  fcmToken            String?             // Already there!
+  fcmToken            String?
   quizzes             Quiz[]
   quizCount           Int                 @default(0)  
   createdAt           DateTime            @default(now())
-  // Add these relations
   sentChallenges      Challenge[]         @relation("challenger")
   receivedChallenges  Challenge[]         @relation("opponent")
+  
+  settings            UserSettings?
+  quizResults         QuizResult[]
 }
 
 model Quiz {
@@ -42,8 +44,6 @@ model Question {
   createdAt      DateTime @default(now())
 }
 
-
-// Add this new model
 model Challenge {
   id           Int      @id @default(autoincrement())
   challengerId Int
@@ -55,4 +55,38 @@ model Challenge {
   acceptedAt   DateTime?
   challenger   User     @relation("challenger", fields: [challengerId], references: [id])
   opponent     User     @relation("opponent", fields: [opponentId], references: [id])
+}
+
+// NEW: User Settings Model
+model UserSettings {
+  id                    Int      @id @default(autoincrement())
+  userId                Int      @unique
+  notificationsEnabled  Boolean  @default(true)
+  emailNotifications    Boolean  @default(true)
+  soundEnabled          Boolean  @default(true)
+  darkMode              Boolean  @default(false)
+  language              String   @default("English")
+  autoSaveProgress      Boolean  @default(true)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// NEW: Quiz Results Model
+model QuizResult {
+  id              Int      @id @default(autoincrement())
+  userId          Int
+  quizId          Int?     // Optional: reference to quiz if available
+  quizTitle       String
+  score           Int
+  totalQuestions  Int
+  percentage      Float    // Score percentage
+  timeTaken       Int?     // Time in seconds
+  createdAt       DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@index([userId])
+  @@index([createdAt])
 }
