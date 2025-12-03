@@ -18,7 +18,7 @@ dotenv.config();
 import "./config/firebase.js";
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = 3000;
 
 
 // ==================== PROMETHEUS METRICS ====================
