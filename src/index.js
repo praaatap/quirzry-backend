@@ -23,19 +23,7 @@ const PORT = 3000;
 
 // ==================== PROMETHEUS METRICS ====================
 
-client.collectDefaultMetrics();
 
-
-// Middleware to start histogram timer and record metrics after response
-app.use((req, res, next) => {
-  const end = httpRequestDurationMicroseconds.startTimer();
-  res.on("finish", () => {
-    // Use req.route?.path or req.baseUrl + req.route?.path for route label if available
-    const route = req.route?.path || req.originalUrl || req.url;
-    end({ method: req.method, route, code: res.statusCode });
-  });
-  next();
-});
 
 // ==================== GLOBAL MIDDLEWARE ====================
 app.use(cors({
