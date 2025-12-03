@@ -21,14 +21,6 @@ import "./config/firebase.js";
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.get('/mobile-test',(req,res)=> {
-  res.json({
-    message:"Mobile test",
-    data:{
-     working:true 
-    }
-  })
-})
 
 // ==================== PROMETHEUS METRICS ====================
 

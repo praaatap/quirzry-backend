@@ -2,6 +2,7 @@ import express from "express";
 import {
   getAllUsers,
   searchUsers,
+  downloadUserData
 } from "../controllers/user.controller.js";
 import { authenticateToken } from "../middleware/authMiddleware.js";
 
@@ -12,5 +13,5 @@ router.use(authenticateToken);
 
 router.get("/users", getAllUsers);
 router.get("/search-users", searchUsers);
-
+router.get("/export-data", downloadUserData);
 export default router;

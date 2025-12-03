@@ -8,29 +8,32 @@ datasource db {
 }
 
 model User {
-  name                String
-  email               String              @unique
-  id                  Int                 @id @default(autoincrement())
-  password            String
-  fcmToken            String?
-  quizzes             Quiz[]
-  quizCount           Int                 @default(0)  
-  createdAt           DateTime            @default(now())
-  sentChallenges      Challenge[]         @relation("challenger")
-  receivedChallenges  Challenge[]         @relation("opponent")
-  
-  settings            UserSettings?
-  quizResults         QuizResult[]
+  name               String
+  email              String      @unique
+  id                 Int         @id @default(autoincrement())
+  password           String
+  fcmToken           String?
+  quizzes            Quiz[]
+  quizCount          Int         @default(0)
+  createdAt          DateTime    @default(now())
+  sentChallenges     Challenge[] @relation("challenger")
+  receivedChallenges Challenge[] @relation("opponent")
+
+  deletionCode        String?
+  deletionCodeExpires DateTime?
+
+  settings    UserSettings?
+  quizResults QuizResult[]
 }
 
 model Quiz {
-  id          Int       @id @default(autoincrement())
-  title       String
-  userId      Int
-  user        User      @relation(fields: [userId], references: [id])
-  questions   Question[]
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id        Int        @id @default(autoincrement())
+  title     String
+  userId    Int
+  user      User       @relation(fields: [userId], references: [id])
+  questions Question[]
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
 }
 
 model Question {
@@ -38,55 +41,58 @@ model Question {
   quizId         Int
   quiz           Quiz     @relation(fields: [quizId], references: [id], onDelete: Cascade)
   questionText   String
-  options        Json     // Array of strings
-  correctAnswer  Int      // Index of correct option
+  options        Json // Array of strings
+  correctAnswer  Int // Index of correct option
   questionNumber Int
   createdAt      DateTime @default(now())
 }
 
 model Challenge {
-  id           Int      @id @default(autoincrement())
+  id           Int       @id @default(autoincrement())
   challengerId Int
   opponentId   Int
-  status       String   @default("pending") // pending, accepted, rejected, expired, cancelled
-  quizId       Int?     // Optional: link to specific quiz
-  createdAt    DateTime @default(now())
+  status       String    @default("pending") // pending, accepted, rejected, expired, cancelled
+  quizId       Int? // Optional: link to specific quiz
+  createdAt    DateTime  @default(now())
   expiresAt    DateTime
   acceptedAt   DateTime?
-  challenger   User     @relation("challenger", fields: [challengerId], references: [id])
-  opponent     User     @relation("opponent", fields: [opponentId], references: [id])
+  challenger   User      @relation("challenger", fields: [challengerId], references: [id])
+  opponent     User      @relation("opponent", fields: [opponentId], references: [id])
 }
 
 // NEW: User Settings Model
 model UserSettings {
-  id                    Int      @id @default(autoincrement())
-  userId                Int      @unique
-  notificationsEnabled  Boolean  @default(true)
-  emailNotifications    Boolean  @default(true)
-  soundEnabled          Boolean  @default(true)
-  darkMode              Boolean  @default(false)
-  language              String   @default("English")
-  autoSaveProgress      Boolean  @default(true)
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  id                   Int      @id @default(autoincrement())
+  userId               Int      @unique
+  notificationsEnabled Boolean  @default(true)
+  emailNotifications   Boolean  @default(true)
+  soundEnabled         Boolean  @default(true)
+  darkMode             Boolean  @default(false)
+  language             String   @default("English")
+  autoSaveProgress     Boolean  @default(true)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 // NEW: Quiz Results Model
 model QuizResult {
-  id              Int      @id @default(autoincrement())
-  userId          Int
-  quizId          Int?     // Optional: reference to quiz if available
-  quizTitle       String
-  score           Int
-  totalQuestions  Int
-  percentage      Float    // Score percentage
-  timeTaken       Int?     // Time in seconds
-  createdAt       DateTime @default(now())
+  id             Int      @id @default(autoincrement())
+  userId         Int
+  quizId         Int? // Optional: reference to quiz if available
+  quizTitle      String
+  score          Int
+  totalQuestions Int
+  percentage     Float // Score percentage
+  timeTaken      Int? // Time in seconds
+  createdAt      DateTime @default(now())
+
+  questionsJson   Json @default("[]") // Stores the full question/options data
+  userAnswersJson Json @default("[]") // Stores the list of indices the user selected
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
+
   @@index([userId])
   @@index([createdAt])
 }

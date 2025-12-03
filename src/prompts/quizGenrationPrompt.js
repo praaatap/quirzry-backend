@@ -2,11 +2,11 @@
 import { Groq } from "groq-sdk";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import prisma from "../config/prisma.js";
-import {GROQ_API_KEY} from '../constants.js';
+
 
 // Initialize Groq client (set GROQ_API_KEY in env)
 const groq = new Groq({
-  apiKey:GROQ_API_KEY
+  apiKey:process.env.GROQ_API_KEY
   // optionally: baseUrl or other config
 });
 

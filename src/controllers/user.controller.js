@@ -68,3 +68,65 @@ export const searchUsers = asyncHandler(async (req, res) => {
 });
 
 
+export const downloadUserData = async (req, res) => {
+  try {
+    // 1. Get the user ID from the authenticated request
+    const userId = req.user.uid;
+
+    if (!userId) {
+      return res.status(400).json({ error: "User ID not found" });
+    }
+
+    // 2. Fetch all related user data
+    // We use 'include' to fetch relations like quizzes they created or results they achieved
+    const userData = await prisma.user.findUnique({
+      where: { firebaseUid: userId },
+      include: {
+        stats: true,     // User statistics
+        results: {       // Quiz results history
+          include: {
+            quiz: {
+              select: { title: true, category: true }
+            }
+          }
+        },
+        quizzes: true,   // Quizzes created by this user
+      },
+    });
+
+    if (!userData) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    // 3. Format the data for export (remove sensitive hash/internal IDs if needed)
+    const exportData = {
+      exportDate: new Date().toISOString(),
+      profile: {
+        name: userData.name,
+        email: userData.email,
+        joined: userData.createdAt,
+      },
+      statistics: userData.stats,
+      quizHistory: userData.results.map(r => ({
+        quiz: r.quiz.title,
+        category: r.quiz.category,
+        score: r.score,
+        date: r.completedAt,
+      })),
+      createdQuizzes: userData.quizzes,
+    };
+
+    // 4. Send the file
+    // Set headers to trigger a file download on the client
+    const fileName = `quirzy_export_${Date.now()}.json`;
+    res.setHeader("Content-Type", "application/json");
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+    
+    // Send the JSON string
+    return res.status(200).send(JSON.stringify(exportData, null, 2));
+
+  } catch (error) {
+    console.error("Export data error:", error);
+    return res.status(500).json({ error: "Failed to generate data export" });
+  }
+};

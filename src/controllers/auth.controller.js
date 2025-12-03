@@ -20,9 +20,8 @@ export const signup = asyncHandler(async (req, res) => {
     return res.status(400).json({ error: "Email already registered" });
   }
 
-  const hashedPassword = await bcrypt.hash(password, 10);
   const user = await prisma.user.create({
-    data: { name, email, password: hashedPassword },
+    data: { name, email, password},
   });
 
   const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET, {
@@ -37,6 +36,7 @@ export const signup = asyncHandler(async (req, res) => {
   });
 });
 
+
 // ==================== SIGNIN ====================
 export const signin = asyncHandler(async (req, res) => {
   const { email, password } = req.body;
@@ -48,15 +48,9 @@ export const signin = asyncHandler(async (req, res) => {
   }
 
   const user = await prisma.user.findUnique({ where: { email } });
-  if (!user) {
+  if (!user && (user.password !== password)) {
     console.log("❌ User not found");
     return res.status(404).json({ error: "User not found" });
-  }
-
-  const isValid = await bcrypt.compare(password, user.password);
-  if (!isValid) {
-    console.log("❌ Invalid password");
-    return res.status(401).json({ error: "Invalid password" });
   }
 
   const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET, {

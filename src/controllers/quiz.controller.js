@@ -1,13 +1,16 @@
 import { asyncHandler } from "../utils/asyncHandler.js";
 import prisma from "../config/prisma.js";
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import { generateQuizPrompt } from "../prompts/quizGenrationPrompt.js";
+import { Groq } from "groq-sdk";
+import { generateQuizPrompt } from "../prompts/quizGenrationPrompt.js"; 
 
-const GEMINI_KEY='AIzaSyBdFlmixwotYjNoE1RvNetnnFkN6Llynl0';
+// ==================== CONFIGURATION ====================
+const GROQ_API_KEY = process.env.GROQ_API_KEY;
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
-// Initialize Gemini AI
-const genAI = new GoogleGenerativeAI("AIzaSyC7e42D3PNt-rNn-KpZNkT4wwlar0imOyA");
-const model = genAI.getGenerativeModel({
+// 1. Initialize Gemini
+const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+const geminiModel = genAI.getGenerativeModel({
   model: "gemini-2.5-flash",
   generationConfig: {
     temperature: 0.7,
@@ -18,43 +21,69 @@ const model = genAI.getGenerativeModel({
   },
 });
 
-// Helper: safely extract text from the model result
-async function extractTextFromResult(result) {
-  // Some SDKs return result.response.text() as a function that returns a Promise,
-  // others return a string directly. Handle both.
+// 2. Initialize Groq
+const groq = new Groq({
+  apiKey: GROQ_API_KEY,
+});
+
+// Global counter to toggle between models
+let requestCounter = 0;
+
+// ==================== HELPER FUNCTIONS ====================
+
+// Unified text extractor for both Gemini and Groq responses
+async function extractTextFromResult(result, provider) {
   try {
-    const response = result?.response;
-    if (!response) {
-      // If SDK returns top-level string or object, try to stringify
-      if (typeof result === "string") return result;
+    if (provider === "GEMINI") {
+      const response = result?.response;
+      if (typeof response?.text === "function") return await response.text();
       return JSON.stringify(result);
+    } 
+    
+    if (provider === "GROQ") {
+        return result.choices?.[0]?.message?.content || "";
     }
 
-    if (typeof response.text === "function") {
-      // async text() function
-      return await response.text();
-    }
-
-    // If response is a string already
-    if (typeof response === "string") return response;
-
-    // Otherwise stringify the response object
-    return JSON.stringify(response);
+    return "";
   } catch (err) {
-    // fallback
-    console.warn("Failed to extract text from result, falling back to JSON stringify", err);
-    try {
-      return JSON.stringify(result);
-    } catch (e) {
-      return String(result);
-    }
+    console.warn(`Failed to extract text from ${provider} result`, err);
+    return "";
   }
 }
 
-// ==================== GENERATE QUIZ WITH GEMINI AI ====================
+// Clean and Parse JSON from LLM response
+function parseQuizJSON(text) {
+  let cleanedText = (text || "").trim();
+
+  // Remove markdown code fences
+  cleanedText = cleanedText.replace(/^```json\n?/g, "").replace(/^```\n?/g, "").replace(/\n?```$/g, "").trim();
+
+  // Attempt direct parse
+  try {
+    return JSON.parse(cleanedText);
+  } catch (e) {
+    // Attempt to extract JSON substring
+    const firstBrace = cleanedText.indexOf("{");
+    const lastBrace = cleanedText.lastIndexOf("}");
+    if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+      return JSON.parse(cleanedText.substring(firstBrace, lastBrace + 1));
+    }
+    throw e;
+  }
+}
+
+// ==================== MAIN CONTROLLER ====================
+
 export const generateQuiz = asyncHandler(async (req, res) => {
-  const { topic, questionCount = 15 } = req.body;
+  const { topic, questionCount = 15, difficulty = "medium" } = req.body;
   const userId = req.userId;
+
+  // Increment Request Counter
+  requestCounter++;
+  
+  // Logic: Odd = Gemini, Even = Groq/Llama
+  const useGroq = requestCounter % 2 === 0;
+  const currentProvider = useGroq ? "GROQ (Llama)" : "GEMINI";
 
   // Validation
   if (!topic || topic.trim().length === 0) {
@@ -63,139 +92,89 @@ export const generateQuiz = asyncHandler(async (req, res) => {
 
   const validQuestionCount = Math.min(Math.max(parseInt(questionCount, 10) || 15, 10), 50);
 
-  console.log(`🎯 Generating ${validQuestionCount} questions on: ${topic} for user ${userId}`);
+  console.log(`\n🎯 Request #${requestCounter} | Provider: ${currentProvider}`);
+  console.log(`📝 Generating ${validQuestionCount} questions on: "${topic}" (${difficulty})`);
+
+  let rawText = "";
 
   try {
-    // Generate prompt for Gemini
-    const prompt = generateQuizPrompt(topic, validQuestionCount, "medium");
+    const prompt = generateQuizPrompt(topic, validQuestionCount, difficulty);
 
-    console.log("🤖 Calling Gemini AI...");
-
-    // Call Gemini AI API
-    const result = await model.generateContent(prompt);
-    const text = await extractTextFromResult(result);
-
-    console.log("✅ Gemini response received");
-    console.log("📄 Raw response length:", text ? text.length : 0);
-
-    // Parse and validate the response
-    let quizData;
-    try {
-      // Clean the response text (remove markdown code fences if present)
-      let cleanedText = (text || "").trim();
-
-      // Remove leading ```json or ``` code fences and trailing ``` fences
-      if (cleanedText.startsWith("```json")) {
-        cleanedText = cleanedText.replace(/^```json\n?/g, "");
-      }
-      if (cleanedText.startsWith("```")) {
-        cleanedText = cleanedText.replace(/^```\n?/g, "");
-      }
-      if (cleanedText.endsWith("```")) {
-        cleanedText = cleanedText.replace(/\n?```$/g, "");
-      }
-
-      cleanedText = cleanedText.trim();
-
-      // If cleanedText looks like JSON already, parse. Otherwise attempt to find JSON substring.
-      // First attempt: direct parse
-      try {
-        quizData = JSON.parse(cleanedText);
-      } catch (firstParseErr) {
-        // Try to find the first { ... } JSON block in the cleanedText
-        const firstBrace = cleanedText.indexOf("{");
-        const lastBrace = cleanedText.lastIndexOf("}");
-        if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-          const jsonSubstring = cleanedText.substring(firstBrace, lastBrace + 1);
-          quizData = JSON.parse(jsonSubstring);
-        } else {
-          throw firstParseErr;
-        }
-      }
-
-      // Validate structure
-      if (!quizData.questions || !Array.isArray(quizData.questions)) {
-        throw new Error("Invalid response structure: missing questions array");
-      }
-
-      if (quizData.questions.length === 0) {
-        throw new Error("No questions generated");
-      }
-
-      console.log(`✅ Parsed ${quizData.questions.length} questions`);
-    } catch (parseError) {
-      console.error("❌ Failed to parse Gemini response:", parseError.message);
-      console.error("Raw response (first 1000 chars):", (text || "").substring(0, 1000));
-
-      return res.status(500).json({
-        error: "Failed to generate valid quiz questions. Please try again.",
-        details: process.env.NODE_ENV === "development" ? parseError.message : undefined,
+    if (useGroq) {
+      // --- GROQ EXECUTION ---
+      const completion = await groq.chat.completions.create({
+        model: process.env.LLAMA_MODEL_NAME || "llama-3.1-8b-instant",
+        messages: [
+          { role: "system", content: "You are a high-quality JSON-only quiz generator. Return only valid JSON." },
+          { role: "user", content: prompt }
+        ],
+        temperature: 0.7,
+        max_completion_tokens: 8192,
       });
+      rawText = await extractTextFromResult(completion, "GROQ");
+    } else {
+      // --- GEMINI EXECUTION ---
+      const result = await geminiModel.generateContent(prompt);
+      rawText = await extractTextFromResult(result, "GEMINI");
     }
 
-    // Validate and clean each question
+    console.log(`✅ ${currentProvider} response received. Length: ${rawText.length}`);
+
+    // --- COMMON PARSING LOGIC ---
+    let quizData;
+    try {
+      quizData = parseQuizJSON(rawText);
+      
+      if (!quizData.questions || !Array.isArray(quizData.questions)) {
+        throw new Error("Missing 'questions' array in response");
+      }
+    } catch (parseError) {
+      console.error(`❌ Failed to parse JSON from ${currentProvider}`);
+      return res.status(500).json({ error: "AI generation failed (Parsing Error). Please try again." });
+    }
+
+    // --- COMMON VALIDATION LOGIC ---
     const validatedQuestions = [];
+    
     for (let i = 0; i < quizData.questions.length; i++) {
       const q = quizData.questions[i];
-
       try {
-        // Validate question structure
-        if (!q || typeof q !== "object") {
-          throw new Error(`Invalid question object at index ${i}`);
-        }
+        if (!q.questionText || !Array.isArray(q.options) || q.options.length !== 4) continue;
 
-        if (!q.questionText || typeof q.questionText !== "string") {
-          throw new Error(`Invalid questionText at index ${i}`);
-        }
-
-        if (!q.options || !Array.isArray(q.options) || q.options.length !== 4) {
-          throw new Error(`Invalid options at index ${i} — expected 4 options`);
-        }
-
-        // Handle correctAnswer as either index (number) or value (string)
-        let correctAnswerIndex;
-        if (typeof q.correctAnswer === "number") {
-          correctAnswerIndex = q.correctAnswer;
-        } else if (typeof q.correctAnswer === "string") {
-          // Find the index of the correct answer in options
-          correctAnswerIndex = q.options.indexOf(q.correctAnswer);
-          if (correctAnswerIndex === -1) {
-            // Try a trimmed compare
-            const trimmedMatch = q.options.map((o) => String(o).trim()).indexOf(q.correctAnswer.trim());
-            if (trimmedMatch === -1) {
-              throw new Error(`correctAnswer "${q.correctAnswer}" not found in options at index ${i}`);
+        let correctAnswerIndex = q.correctAnswer;
+        
+        // Fix string-based answers or string-based indices
+        if (typeof correctAnswerIndex === 'string') {
+            // Check if it's a number string "0"
+            if (!isNaN(parseInt(correctAnswerIndex))) {
+                correctAnswerIndex = parseInt(correctAnswerIndex);
+            } else {
+                // It's the text of the answer, find index
+                correctAnswerIndex = q.options.findIndex(opt => opt.trim() === correctAnswerIndex.trim());
             }
-            correctAnswerIndex = trimmedMatch;
-          }
-        } else {
-          throw new Error(`Invalid correctAnswer type at index ${i}`);
         }
 
-        // Validate index is in range
-        if (typeof correctAnswerIndex !== "number" || correctAnswerIndex < 0 || correctAnswerIndex > 3) {
-          throw new Error(`correctAnswer index out of range at index ${i}`);
+        if (correctAnswerIndex < 0 || correctAnswerIndex > 3 || isNaN(correctAnswerIndex)) {
+            // Fallback: If AI messed up, set to 0 (First option)
+            console.warn(`⚠️ Invalid answer index at Q${i}, defaulting to 0`);
+            correctAnswerIndex = 0;
         }
 
         validatedQuestions.push({
           questionText: q.questionText.trim(),
-          options: q.options.map((opt) => String(opt).trim()),
-          correctAnswer: correctAnswerIndex,
+          options: q.options.map(o => String(o).trim()),
+          correctAnswer: correctAnswerIndex
         });
-      } catch (validationError) {
-        console.warn(`⚠️ Skipping invalid question ${i}:`, validationError.message);
-        continue;
+      } catch (e) {
+        continue; // Skip bad questions
       }
     }
 
     if (validatedQuestions.length === 0) {
-      return res.status(500).json({
-        error: "No valid questions could be generated. Please try again.",
-      });
+      throw new Error("No valid questions parsed from AI response");
     }
 
-    console.log(`✅ Validated ${validatedQuestions.length} questions`);
-
-    // Save quiz to database
+    // --- DB SAVING (PRISMA) ---
     const quiz = await prisma.quiz.create({
       data: {
         title: `${topic} Quiz`,
@@ -210,75 +189,60 @@ export const generateQuiz = asyncHandler(async (req, res) => {
         },
       },
       include: {
-        questions: {
-          orderBy: {
-            questionNumber: "asc",
-          },
-        },
+        questions: { orderBy: { questionNumber: "asc" } },
       },
     });
 
-    console.log(`✅ Quiz saved to database: ID ${quiz.id}`);
+    console.log(`💾 Quiz saved! ID: ${quiz.id}`);
 
-    // Return response
     res.status(201).json({
       quizId: quiz.id,
       title: quiz.title,
       questionCount: quiz.questions.length,
-      questions: quiz.questions.map((q) => ({
-        id: q.id,
-        questionText: q.questionText,
-        options: q.options,
-        correctAnswer: q.correctAnswer,
-        questionNumber: q.questionNumber,
-      })),
+      questions: quiz.questions,
     });
+
   } catch (error) {
-    console.error("❌ Quiz generation error:", error);
-    console.error("❌ Error stack:", error?.stack);
-
-    // Handle specific error types
-    if (error.message?.includes("API key")) {
-      return res.status(500).json({
-        error: "API configuration error. Please contact support.",
-      });
+    console.error("❌ Generation Error:", error);
+    // Determine if it's an API Key/Quota issue
+    const msg = error.message?.toLowerCase() || "";
+    if (msg.includes("api key") || msg.includes("unauthorized")) {
+       return res.status(500).json({ error: "Server Configuration Error (API Key)." });
     }
-
-    if (error.message?.includes("quota")) {
-      return res.status(429).json({
-        error: "Service temporarily unavailable. Please try again later.",
-      });
+    if (msg.includes("quota") || msg.includes("too many requests")) {
+       return res.status(429).json({ error: "System busy. Please try again." });
     }
-
-    return res.status(500).json({
-      error: "Failed to generate quiz. Please try again.",
-      details: process.env.NODE_ENV === "development" ? error.message : undefined,
-    });
+    res.status(500).json({ error: "Failed to generate quiz." });
   }
 });
 
-// ==================== GET MY QUIZZES ====================
-export const getMyQuizzes = asyncHandler(async (req, res) => {
-  const userId = req.userId;
-  console.log(`📋 Fetching quizzes for user ${userId}`);
+// ==================== NEW: HISTORY & STATS CONTROLLERS ====================
 
-  const quizzes = await prisma.quiz.findMany({
-    where: { userId },
-    include: {
-      questions: {
-        select: {
-          id: true,
-        },
-      },
-    },
-    orderBy: {
-      createdAt: "desc",
-    },
-    take: 20,
+
+// RENAME: getQuizHistory → getMyQuizResults
+export const getMyQuizResults = asyncHandler(async (req, res) => {
+  const userId = req.userId;
+
+  const history = await prisma.quizResult.findMany({
+    where: { userId: userId },
+    orderBy: { createdAt: 'desc' },
   });
 
-  console.log(`✅ Found ${quizzes.length} quizzes`);
+  console.log(`✅ Found ${history.length} quiz results for user ${userId}`);
+  res.json(history);
+});
 
+
+
+// Gets quizzes created by the user (Not played history)
+export const getMyQuizzes = asyncHandler(async (req, res) => {
+  const userId = req.userId;
+  const quizzes = await prisma.quiz.findMany({
+    where: { userId },
+    include: { questions: { select: { id: true } } },
+    orderBy: { createdAt: "desc" },
+    take: 20,
+  });
   res.json({
     quizzes: quizzes.map((q) => ({
       id: q.id,
@@ -288,125 +252,98 @@ export const getMyQuizzes = asyncHandler(async (req, res) => {
     })),
   });
 });
-
-// ==================== GET SPECIFIC QUIZ ====================
 export const getQuiz = asyncHandler(async (req, res) => {
   const { quizId } = req.params;
-  const userId = req.userId;
+  const userId = req.userId || req.user?.id; // Handle both middleware types
 
-  console.log(`📖 Fetching quiz ${quizId} for user ${userId}`);
-
-  const quiz = await prisma.quiz.findFirst({
-    where: {
-      id: parseInt(quizId, 10),
-      userId,
-    },
-    include: {
-      questions: {
-        orderBy: {
-          questionNumber: "asc",
-        },
-      },
-    },
-  });
-
-  if (!quiz) {
-    console.log("❌ Quiz not found");
-    return res.status(404).json({ error: "Quiz not found" });
+  // FIX: Validate ID before calling Prisma
+  const id = parseInt(quizId, 10);
+  if (isNaN(id)) {
+    return res.status(400).json({ error: "Invalid Quiz ID provided" });
   }
 
-  console.log(`✅ Quiz found: ${quiz.title}`);
+  const quiz = await prisma.quiz.findFirst({
+    where: { id: id, userId },
+    include: { questions: { orderBy: { questionNumber: "asc" } } },
+  });
+
+  if (!quiz) return res.status(404).json({ error: "Quiz not found" });
 
   res.json({
     id: quiz.id,
     title: quiz.title,
     createdAt: quiz.createdAt,
     questionCount: quiz.questions.length,
-    questions: quiz.questions.map((q) => ({
-      id: q.id,
-      questionText: q.questionText,
-      options: q.options,
-      correctAnswer: q.correctAnswer,
-      questionNumber: q.questionNumber,
-    })),
+    questions: quiz.questions,
   });
 });
 
-// ==================== DELETE QUIZ ====================
 export const deleteQuiz = asyncHandler(async (req, res) => {
   const { quizId } = req.params;
   const userId = req.userId;
+  
+  const quiz = await prisma.quiz.findFirst({ where: { id: parseInt(quizId, 10), userId } });
+  if (!quiz) return res.status(404).json({ error: "Quiz not found" });
 
-  console.log(`🗑️ Deleting quiz ${quizId} for user ${userId}`);
-
-  // Check if quiz exists and belongs to user
-  const quiz = await prisma.quiz.findFirst({
-    where: {
-      id: parseInt(quizId, 10),
-      userId,
-    },
-  });
-
-  if (!quiz) {
-    console.log("❌ Quiz not found");
-    return res.status(404).json({ error: "Quiz not found" });
-  }
-
-  // Delete quiz (questions will be cascaded)
-  await prisma.quiz.delete({
-    where: {
-      id: parseInt(quizId, 10),
-    },
-  });
-
-  console.log(`✅ Quiz deleted: ${quizId}`);
-
+  await prisma.quiz.delete({ where: { id: parseInt(quizId, 10) } });
   res.json({ message: "Quiz deleted successfully" });
 });
-// ==================== RESET QUIZ COUNT (FOR TESTING) ====================
+
 export const resetQuizCount = asyncHandler(async (req, res) => {
   const userId = req.userId;
-
-  console.log(`🔄 Resetting quiz count for user ${userId}`);
-
-  await prisma.user.update({
-    where: { id: userId },
-    data: { quizCount: 0 }
-  });
-
-  console.log(`✅ Quiz count reset to 0 for user ${userId}`);
-
-  res.json({
-    success: true,
-    message: "Quiz count reset successfully",
-    quizCount: 0
-  });
+  await prisma.user.update({ where: { id: userId }, data: { quizCount: 0 } });
+  res.json({ success: true, message: "Quiz count reset", quizCount: 0 });
 });
 
 export const getQuizCount = asyncHandler(async (req, res) => {
   const userId = req.userId;
-
-  console.log(`📊 Fetching quiz count for user ${userId}`);
-
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { 
-      quizCount: true,
-      name: true,
-      email: true 
-    }
-  });
-
-  if (!user) {
-    return res.status(404).json({ error: "User not found" });
-  }
-
-  console.log(`✅ Quiz count: ${user.quizCount || 0}`);
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { quizCount: true } });
+  if (!user) return res.status(404).json({ error: "User not found" });
 
   res.json({
     success: true,
     quizCount: user.quizCount || 0,
-    shouldShowAd: (user.quizCount || 0) >= 1, // First quiz is free
+    shouldShowAd: (user.quizCount || 0) >= 1,
     remainingFreeQuizzes: Math.max(0, 1 - (user.quizCount || 0))
   });
 });
+
+
+
+export const saveQuizResult = async (req, res) => {
+  try {
+    const userId = req.userId;
+    const { 
+      quizId, 
+      quizTitle, 
+      score, 
+      totalQuestions, 
+      timeTaken, 
+      questions, // Full list of questions
+      userSelectedAnswers // List of user's selected indices (e.g. [0, 1, -1, 2])
+    } = req.body;
+
+    const percentage = totalQuestions > 0 ? (score / totalQuestions) * 100 : 0;
+
+    const result = await prisma.quizResult.create({
+      data: {
+        userId,
+        quizId: quizId ? parseInt(quizId) : null,
+        quizTitle,
+        score,
+        totalQuestions,
+        percentage,
+        timeTaken,
+        // Save the detailed history as JSON
+        questionsJson: questions || [],
+        userAnswersJson: userSelectedAnswers || [] 
+      }
+    });
+
+    res.status(201).json(result);
+  } catch (error) {
+    console.error("Save Result Error:", error);
+    res.status(500).json({ error: "Failed to save result" });
+  }
+};
+

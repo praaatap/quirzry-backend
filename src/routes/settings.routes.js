@@ -27,3 +27,4 @@ router.get("/settings/download-data", downloadUserData);
 router.delete("/settings/delete-account", deleteUserAccount);
 
 export default router;
+ 

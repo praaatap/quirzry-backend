@@ -111,68 +111,95 @@ export const clearQuizHistory = async (req, res) => {
   }
 };
 
-// Download user data
+
+// download user data
 export const downloadUserData = async (req, res) => {
   try {
-    const userId = parseInt(req.user.userId);
+    // We rely on auth middleware to set numeric DB id on req.userId
+    const userId = req.userId ?? (req.user && req.user.id) ?? null;
+    console.log("downloadUserData -> req.userId:", userId);
 
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      include: {
-        quizResults: {
-          orderBy: { createdAt: 'desc' },
-        },
-        settings: true,
-        quizzes: {
-          include: {
-            questions: true,
-          },
-        },
-        sentChallenges: true,
-        receivedChallenges: true,
-      },
-    });
-
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found",
-      });
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthenticated: userId not found on request" });
     }
 
-    const userData = {
+    // Fetch user and related data using relation names from your Prisma schema
+    const userData = await prisma.user.findUnique({
+      where: { id: Number(userId) },
+      include: {
+        settings: true,              // UserSettings?
+        quizResults: true,           // QuizResult[]
+        quizzes: true,               // Quiz[]
+        sentChallenges: true,        // Challenge[] (as challenger)
+        receivedChallenges: true,    // Challenge[] (as opponent)
+      },
+    });
+
+    if (!userData) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    // Build export payload (defensive about missing fields)
+    const exportData = {
+      exportDate: new Date().toISOString(),
       profile: {
-        name: user.name,
-        email: user.email,
-        quizCount: user.quizCount,
-        createdAt: user.createdAt,
+        id: userData.id,
+        name: userData.name ?? null,
+        email: userData.email ?? null,
+        joined: userData.createdAt ?? null,
       },
-      settings: user.settings,
-      quizHistory: user.quizResults,
-      createdQuizzes: user.quizzes,
-      challenges: {
-        sent: user.sentChallenges,
-        received: user.receivedChallenges,
-      },
-      statistics: {
-        totalQuizzes: user.quizResults.length,
-        averageScore: user.quizResults.length > 0
-          ? user.quizResults.reduce((sum, result) => sum + result.percentage, 0) / user.quizResults.length
-          : 0,
-      },
+      settings: userData.settings ?? null,
+      quizHistory: Array.isArray(userData.quizResults)
+        ? userData.quizResults.map(r => ({
+            id: r.id,
+            quizTitle: r.quizTitle ?? null,   // stored on QuizResult
+            score: r.score ?? null,
+            totalQuestions: r.totalQuestions ?? null,
+            percentage: r.percentage ?? null,
+            timeTaken: r.timeTaken ?? null,
+            date: r.createdAt ?? null,
+          }))
+        : [],
+      createdQuizzes: Array.isArray(userData.quizzes)
+        ? userData.quizzes.map(q => ({
+            id: q.id,
+            title: q.title,
+            createdAt: q.createdAt,
+            updatedAt: q.updatedAt,
+          }))
+        : [],
+      sentChallenges: Array.isArray(userData.sentChallenges)
+        ? userData.sentChallenges.map(c => ({
+            id: c.id,
+            opponentId: c.opponentId,
+            status: c.status,
+            quizId: c.quizId ?? null,
+            createdAt: c.createdAt,
+            expiresAt: c.expiresAt,
+            acceptedAt: c.acceptedAt ?? null,
+          }))
+        : [],
+      receivedChallenges: Array.isArray(userData.receivedChallenges)
+        ? userData.receivedChallenges.map(c => ({
+            id: c.id,
+            challengerId: c.challengerId,
+            status: c.status,
+            quizId: c.quizId ?? null,
+            createdAt: c.createdAt,
+            expiresAt: c.expiresAt,
+            acceptedAt: c.acceptedAt ?? null,
+          }))
+        : [],
     };
 
-    res.status(200).json({
-      success: true,
-      data: userData,
-    });
+    // Send downloadable JSON
+    const fileName = `quirzy_export_user_${userData.id}_${Date.now()}.json`;
+    res.setHeader("Content-Type", "application/json");
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+    return res.status(200).send(JSON.stringify(exportData, null, 2));
   } catch (error) {
-    console.error("Error downloading data:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to download data",
-      error: error.message,
-    });
+    console.error("downloadUserData - unexpected error:", error);
+    return res.status(500).json({ error: "Failed to generate data export", detail: String(error) });
   }
 };
 
