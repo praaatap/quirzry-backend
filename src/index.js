@@ -34,6 +34,10 @@ app.use(cors({
 app.use(express.json());
 app.use(logger);
 
+app.use('/testing-endpoint', (req, res) => {
+  res.json({ message: 'This is a testing endpoint! For Ci Cd' });
+});
+
 // ==================== ROUTES ====================
 app.use("/", mainRouter);
 
