@@ -22,9 +22,11 @@ model User {
   deletionCode        String?
   deletionCodeExpires DateTime?
 
-  settings    UserSettings?
-  quizResults QuizResult[]
+  settings      UserSettings?
+  quizResults   QuizResult[]
+  flashcardSets FlashcardSet[]
 }
+
 
 model Quiz {
   id        Int        @id @default(autoincrement())
@@ -96,3 +98,37 @@ model QuizResult {
   @@index([userId])
   @@index([createdAt])
 }
+
+// NEW: Flashcard Set Model
+model FlashcardSet {
+  id        Int         @id @default(autoincrement())
+  title     String
+  topic     String
+  userId    Int
+  cards     Flashcard[]
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([createdAt])
+}
+
+// NEW: Flashcard Model
+model Flashcard {
+  id            Int      @id @default(autoincrement())
+  setId         Int
+  front         String   // Question/Term
+  back          String   // Answer/Definition
+  cardNumber    Int
+  timesReviewed Int      @default(0)
+  timesCorrect  Int      @default(0)
+  lastReviewed  DateTime?
+  createdAt     DateTime @default(now())
+
+  set FlashcardSet @relation(fields: [setId], references: [id], onDelete: Cascade)
+
+  @@index([setId])
+}
+

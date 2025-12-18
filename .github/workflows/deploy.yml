@@ -2,41 +2,41 @@ name: Deploy to Azure VM
 
 on:
   push:
-    branches: ["main"]
+    branches:
+      - main
 
 jobs:
   deploy:
+    name: Deploy Backend to Azure VM
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
+      - name: Checkout Code
         uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 18
 
       - name: Install Dependencies
         run: npm install
 
-      - name: Secure Copy to VM
+      - name: Copy Backend to VM
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.AZURE_HOST }}
           username: ${{ secrets.AZURE_USER }}
-          key: ${{ secrets.AZURE_SSH_KEY }}
+          key: |
+            ${{ secrets.AZURE_SSH_KEY }}
           source: "."
           target: "/home/${{ secrets.AZURE_USER }}/quirzy-backend"
+          overwrite: true
 
-      - name: Restart Server on VM
+      - name: Restart Server on VM (PM2 Reload)
         uses: appleboy/ssh-action@v0.1.7
         with:
           host: ${{ secrets.AZURE_HOST }}
           username: ${{ secrets.AZURE_USER }}
-          key: ${{ secrets.AZURE_SSH_KEY }}
+          key: |
+            ${{ secrets.AZURE_SSH_KEY }}
           script: |
-            cd quirzy-backend
+            cd /home/${{ secrets.AZURE_USER }}/quirzy-backend
             npm install --production
-            pm2 restart quirzy || pm2 start src/index.js --name quirzy
+            pm2 reload quirzy || pm2 start src/index.js --name quirzy
             pm2 save

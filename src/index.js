@@ -21,9 +21,6 @@ const app = express();
 const PORT = 3000;
 
 
-// ==================== PROMETHEUS METRICS ====================
-
-
 
 // ==================== GLOBAL MIDDLEWARE ====================
 app.use(cors({

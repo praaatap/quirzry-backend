@@ -3,7 +3,8 @@ import authRoutes from "./auth.routes.js";
 import userRoutes from "./user.routes.js";
 import challengeRoutes from "./challenge.routes.js";
 import quizRoutes from './quiz.routes.js';
-import settingsRoutes from './settings.routes.js'; // ADD THIS
+import settingsRoutes from './settings.routes.js';
+import flashcardRoutes from './flashcard.routes.js';
 
 const router = express.Router();
 
@@ -18,7 +19,8 @@ router.get("/", (req, res) => {
       users: "/api/users",
       challenges: "/api/challenges/*",
       quiz: "/api/quiz/*",
-      settings: "/api/settings/*", // Document the new endpoint
+      flashcards: "/api/flashcards/*",
+      settings: "/api/settings/*",
     },
   });
 });
@@ -28,6 +30,8 @@ router.use("/", authRoutes);
 router.use("/", userRoutes);
 router.use("/challenges", challengeRoutes);
 router.use("/quiz", quizRoutes);
+router.use("/flashcards", flashcardRoutes);
 router.use("/", settingsRoutes); 
 
 export default router;
+
