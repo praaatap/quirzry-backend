@@ -1,6 +1,6 @@
+import "dotenv/config";
 import express from "express";
 import cors from "cors";
-import dotenv from "dotenv";
 import prisma from "./config/prisma.js";
 import logger from "./middleware/loggerMiddleware.js";
 import {
@@ -8,11 +8,6 @@ import {
   notFoundHandler,
 } from "./middleware/errorMiddleware.js";
 import mainRouter from "./routes/index.js";
-
-// Prometheus client
-
-// Initialize environment variables
-dotenv.config();
 
 // Initialize Firebase Admin (imported in config/firebase.js)
 import "./config/firebase.js";

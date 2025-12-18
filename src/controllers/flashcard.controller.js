@@ -3,8 +3,6 @@ import prisma from "../config/prisma.js";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { Groq } from "groq-sdk";
 
-// ==================== CONFIGURATION ====================
-const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
 // Initialize Gemini
@@ -21,9 +19,19 @@ const geminiModel = genAI.getGenerativeModel({
 });
 
 // Initialize Groq
-const groq = new Groq({
-  apiKey: GROQ_API_KEY,
-});
+// Initialize Groq (Lazy)
+let groqClient;
+function getGroqClient() {
+  if (!process.env.GROQ_API_KEY) {
+    throw new Error("GROQ_API_KEY is missing");
+  }
+  if (!groqClient) {
+    groqClient = new Groq({
+      apiKey: process.env.GROQ_API_KEY,
+    });
+  }
+  return groqClient;
+}
 
 // Global counter for load balancing
 let requestCounter = 0;
@@ -120,7 +128,7 @@ export const generateFlashcards = asyncHandler(async (req, res) => {
     const prompt = generateFlashcardPrompt(topic, validCardCount);
 
     if (useGroq) {
-      const completion = await groq.chat.completions.create({
+      const completion = await getGroqClient().chat.completions.create({
         model: process.env.LLAMA_MODEL_NAME || "llama-3.1-8b-instant",
         messages: [
           { role: "system", content: "You are a high-quality JSON-only flashcard generator. Return only valid JSON." },
