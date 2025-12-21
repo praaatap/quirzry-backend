@@ -3,12 +3,19 @@ import { Groq } from "groq-sdk";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import prisma from "../config/prisma.js";
 
-
-// Initialize Groq client (set GROQ_API_KEY in env)
-const groq = new Groq({
-  apiKey:process.env.GROQ_API_KEY
-  // optionally: baseUrl or other config
-});
+// Initialize Groq client (Lazy Load to avoid crash before env loads)
+let groq;
+function getGroqClient() {
+  if (!process.env.GROQ_API_KEY) {
+    throw new Error("GROQ_API_KEY is missing");
+  }
+  if (!groq) {
+    groq = new Groq({
+      apiKey: process.env.GROQ_API_KEY
+    });
+  }
+  return groq;
+}
 
 /**
  * Helper: safely extract text from the model result (adapted for groq SDK shapes)
@@ -170,7 +177,7 @@ export const generateQuiz = asyncHandler(async (req, res) => {
 
     console.log("🤖 Calling Llama (via Groq)...");
     // Call Groq chat completion using Llama instant model
-    const result = await groq.chat.completions.create({
+    const result = await getGroqClient().chat.completions.create({
       model: process.env.LLAMA_MODEL_NAME || "llama-3.1-8b-instant",
       messages: [
         { role: "system", content: "You are a high-quality JSON-only quiz generator. Return only valid JSON following the spec." },

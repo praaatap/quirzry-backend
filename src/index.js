@@ -1,6 +1,7 @@
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
+import client from "prom-client";
 import prisma from "./config/prisma.js";
 import logger from "./middleware/loggerMiddleware.js";
 import {

@@ -1,22 +1,30 @@
 import { asyncHandler } from "../utils/asyncHandler.js";
 import prisma from "../config/prisma.js";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+// Note: GoogleGenerativeAI is loaded lazily in getGeminiModel()
 import { Groq } from "groq-sdk";
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-
-// Initialize Gemini
-const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-const geminiModel = genAI.getGenerativeModel({
-  model: "gemini-2.5-flash",
-  generationConfig: {
-    temperature: 0.7,
-    topK: 40,
-    topP: 0.95,
-    maxOutputTokens: 8192,
-    responseMimeType: "application/json",
-  },
-});
+// Initialize Gemini (Lazy Load to avoid crash before env loads)
+let geminiModel;
+function getGeminiModel() {
+  if (!process.env.GEMINI_API_KEY) {
+    throw new Error("GEMINI_API_KEY is missing");
+  }
+  if (!geminiModel) {
+    const { GoogleGenerativeAI } = require("@google/generative-ai");
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+    geminiModel = genAI.getGenerativeModel({
+      model: "gemini-2.5-flash",
+      generationConfig: {
+        temperature: 0.7,
+        topK: 40,
+        topP: 0.95,
+        maxOutputTokens: 8192,
+        responseMimeType: "application/json",
+      },
+    });
+  }
+  return geminiModel;
+}
 
 // Initialize Groq
 // Initialize Groq (Lazy)
@@ -139,7 +147,7 @@ export const generateFlashcards = asyncHandler(async (req, res) => {
       });
       rawText = await extractTextFromResult(completion, "GROQ");
     } else {
-      const result = await geminiModel.generateContent(prompt);
+      const result = await getGeminiModel().generateContent(prompt);
       rawText = await extractTextFromResult(result, "GEMINI");
     }
 
