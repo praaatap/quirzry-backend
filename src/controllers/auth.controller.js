@@ -36,7 +36,6 @@ export const signup = asyncHandler(async (req, res) => {
   });
 });
 
-
 // ==================== SIGNIN ====================
 export const signin = asyncHandler(async (req, res) => {
   const { email, password } = req.body;
@@ -48,9 +47,9 @@ export const signin = asyncHandler(async (req, res) => {
   }
 
   const user = await prisma.user.findUnique({ where: { email } });
-  if (!user && (user.password !== password)) {
-    console.log("❌ User not found");
-    return res.status(404).json({ error: "User not found" });
+  if (!user || user.password !== password) {
+    console.log("❌ Invalid credentials");
+    return res.status(401).json({ error: "Invalid email or password" });
   }
 
   const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET, {

@@ -5,6 +5,7 @@ import challengeRoutes from "./challenge.routes.js";
 import quizRoutes from './quiz.routes.js';
 import settingsRoutes from './settings.routes.js';
 import flashcardRoutes from './flashcard.routes.js';
+import studyRoutes from './study.routes.js';
 
 const router = express.Router();
 
@@ -21,6 +22,7 @@ router.get("/", (req, res) => {
       quiz: "/api/quiz/*",
       flashcards: "/api/flashcards/*",
       settings: "/api/settings/*",
+      study: "/api/study/*",
     },
   });
 });
@@ -32,6 +34,7 @@ router.use("/challenges", challengeRoutes);
 router.use("/quiz", quizRoutes);
 router.use("/flashcards", flashcardRoutes);
 router.use("/", settingsRoutes); 
+router.use("/study", studyRoutes); 
 
 export default router;
 
